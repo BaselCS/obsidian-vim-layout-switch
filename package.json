@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-vim-layout-switch",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "Obsidian plugin: English keyboard layout in Vim normal mode, your own layout (Arabic, etc.) in insert mode.",
 	"main": "main.js",
 	"type": "module",

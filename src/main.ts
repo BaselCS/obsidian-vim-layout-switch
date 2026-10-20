@@ -22,6 +22,8 @@ interface VimLayoutSwitchSettings {
 	showNotices: boolean;
 	/** Verbose logging in the developer console. */
 	debug: boolean;
+	/** Emulate Vim's `set clipboard=unnamedplus` without any vimrc plugin. */
+	clipboardUnnamedPlus: boolean;
 }
 
 const DEFAULT_SETTINGS: VimLayoutSwitchSettings = {
@@ -29,7 +31,20 @@ const DEFAULT_SETTINGS: VimLayoutSwitchSettings = {
 	englishLayoutIndex: 0,
 	showNotices: true,
 	debug: false,
+	clipboardUnnamedPlus: true,
 };
+
+interface SystemClipboard {
+	readText: () => string;
+	writeText: (text: string) => void;
+}
+
+/** Registers own properties added by this plugin at runtime. */
+interface PatchedRegisterController {
+	pushText: (...args: any[]) => void;
+	getRegister: (name: string) => { setText: (text: string, linewise?: boolean, blockwise?: boolean) => void };
+	__vlsPatched?: boolean;
+}
 
 /* -------------------------------------------------------------------------- */
 /*  Compositor backends                                                       */
@@ -146,6 +161,53 @@ function modeFromVimState(vim: any): string | null {
 	return "normal";
 }
 
+/**
+ * Obsidian replaces `navigator.clipboard` with an async wrapper, but the
+ * underlying Electron clipboard module is synchronous and available in the
+ * renderer. A synchronous read is required to intercept `p` before the vim
+ * action consumes the unnamed register.
+ */
+function systemClipboard(): SystemClipboard | null {
+	const w = window as unknown as {
+		electron?: { clipboard?: SystemClipboard; remote?: { clipboard?: SystemClipboard } };
+	};
+
+	const candidates: (SystemClipboard | undefined)[] = [];
+
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		candidates.push((require("electron") as { clipboard?: SystemClipboard })?.clipboard);
+	} catch {
+		/* electron module not reachable */
+	}
+
+	candidates.push(w.electron?.clipboard, w.electron?.remote?.clipboard);
+
+	for (const candidate of candidates) {
+		if (candidate && typeof candidate.readText === "function" && typeof candidate.writeText === "function") {
+			return candidate;
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Vim lives on the CodeMirror 5 compatibility layer that Obsidian exposes as
+ * `window.CodeMirrorAdapter`. It is the only supported way to reach the
+ * register controller from a plugin.
+ */
+function vimApi(): { getRegisterController?: () => PatchedRegisterController } | null {
+	const w = window as unknown as {
+		CodeMirrorAdapter?: { Vim?: any };
+		CodeMirror?: { Vim?: any };
+	};
+
+	const vim = w.CodeMirrorAdapter?.Vim ?? w.CodeMirror?.Vim;
+	if (!vim || typeof vim.getRegisterController !== "function") return null;
+	return vim;
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Plugin                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -162,6 +224,8 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 	private lastMode: string | null = null;
 	/** Serialises switch/restore so rapid mode changes cannot interleave. */
 	private queue: Promise<void> = Promise.resolve();
+	private registerController: PatchedRegisterController | null = null;
+	private originalPushText: ((...args: any[]) => void) | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -169,6 +233,9 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 		if (this.settings.debug) console.debug("[vim-layout-switch] backend:", this.backend);
 
 		this.addSettingTab(new VimLayoutSwitchSettingTab(this.app, this));
+
+		this.installClipboardBridge();
+		this.registerDomEvent(document, "keydown", this.onKeyDownCapture, true);
 
 		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.attach()));
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.attach()));
@@ -199,6 +266,7 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 	onunload(): void {
 		this.detachAll();
 		this.stopPolling();
+		this.removeClipboardBridge();
 		void this.restore();
 	}
 
@@ -208,6 +276,8 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 		if (!this.settings.enabled) return;
 		if (!isVimEnabled(this.app)) return;
 		if (this.backend === "unknown") return;
+
+		this.installClipboardBridge();
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) return;
@@ -275,6 +345,104 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 		const mode = modeFromVimState(getCodeMirror(view)?.state?.vim);
 		this.handleMode(mode);
 	}
+
+	/* -------------------------------------------------------------- clipboard */
+
+	/** Mirrors every unnamed yank/delete into the system clipboard. */
+	private installClipboardBridge(): void {
+		const vim = vimApi();
+		if (!vim?.getRegisterController) return;
+
+		let controller: PatchedRegisterController;
+		try {
+			controller = vim.getRegisterController();
+		} catch {
+			return;
+		}
+
+		if (!controller || typeof controller.pushText !== "function" || controller.__vlsPatched) return;
+
+		const original = controller.pushText.bind(controller);
+		this.registerController = controller;
+		this.originalPushText = original;
+
+		controller.pushText = (name: string, operator: string, text: string, linewise?: boolean, blockwise?: boolean) => {
+			original(name, operator, text, linewise, blockwise);
+			if (!this.settings.clipboardUnnamedPlus) return;
+			if (!text) return;
+			if (name === "_" || name === "/" || name === ":" || name === ".") return;
+			this.writeClipboard(text);
+		};
+
+		controller.__vlsPatched = true;
+		if (this.settings.debug) console.debug("[vim-layout-switch] clipboard bridge installed");
+	}
+
+	private removeClipboardBridge(): void {
+		if (!this.registerController || !this.originalPushText) return;
+		this.registerController.pushText = this.originalPushText;
+		this.registerController.__vlsPatched = false;
+		this.registerController = null;
+		this.originalPushText = null;
+	}
+
+	private writeClipboard(text: string): void {
+		const clipboard = systemClipboard();
+		if (clipboard) {
+			try {
+				clipboard.writeText(text);
+				return;
+			} catch {
+				/* fall back to the async API below */
+			}
+		}
+		void navigator.clipboard?.writeText(text).catch(() => undefined);
+	}
+
+	/** Current vim mode, from the live editor state when possible. */
+	private currentMode(): string | null {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const mode = view ? modeFromVimState(getCodeMirror(view)?.state?.vim) : null;
+		return mode ?? this.lastMode;
+	}
+
+	/**
+	 * `clipboard=unnamedplus` also means `p` pastes what the rest of the system
+	 * copied. The unnamed register is refreshed from the clipboard before vim
+	 * handles the key, which keeps the paste synchronous (and undoable).
+	 */
+	private onKeyDownCapture = (event: KeyboardEvent): void => {
+		if (!this.settings.clipboardUnnamedPlus) return;
+		if (event.defaultPrevented || event.isComposing) return;
+		if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+		const key = event.key;
+		if (key !== "p" && key !== "P") return;
+
+		const mode = this.currentMode();
+		if (mode !== "normal" && mode !== "visual") return;
+
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const target = event.target as Node | null;
+		if (!view || !target || !view.containerEl.contains(target)) return;
+
+		const clipboard = systemClipboard();
+		if (!clipboard) return;
+
+		let text = "";
+		try {
+			text = clipboard.readText();
+		} catch {
+			return;
+		}
+		if (!text) return;
+
+		try {
+			this.registerController?.getRegister('"')?.setText(text, text.endsWith("\n"), false);
+		} catch {
+			/* register controller vanished */
+		}
+	};
 
 	/* ------------------------------------------------------------- switching */
 
@@ -407,6 +575,19 @@ class VimLayoutSwitchSettingTab extends PluginSettingTab {
 						this.plugin.settings.englishLayoutIndex = parsed;
 						await this.plugin.saveSettings();
 					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Clipboard: unnamedplus")
+			.setDesc(
+				"Copy yanked and deleted text to the system clipboard and paste external clipboard content with p/P. " +
+					"Equivalent to `set clipboard=unnamedplus`, built in — no vimrc plugin required.",
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.clipboardUnnamedPlus).onChange(async (value) => {
+					this.plugin.settings.clipboardUnnamedPlus = value;
+					await this.plugin.saveSettings();
+				}),
 			);
 
 		new Setting(containerEl)

@@ -273,11 +273,13 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 	/* ---------------------------------------------------------------- attach */
 
 	private attach(): void {
+		// Clipboard support is independent of the layout switching feature.
+		this.installClipboardBridge();
+
 		if (!this.settings.enabled) return;
 		if (!isVimEnabled(this.app)) return;
 		if (this.backend === "unknown") return;
 
-		this.installClipboardBridge();
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) return;

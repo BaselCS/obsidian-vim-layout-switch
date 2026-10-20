@@ -160,6 +160,8 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 	private listeners: { cm: any; handler: (event: { mode?: string }) => void }[] = [];
 	private pollId: number | null = null;
 	private lastMode: string | null = null;
+	/** Serialises switch/restore so rapid mode changes cannot interleave. */
+	private queue: Promise<void> = Promise.resolve();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -247,8 +249,12 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 
 		if (this.settings.debug) console.debug("[vim-layout-switch] mode:", mode);
 
-		if (mode === "insert" || mode === "replace") void this.restore();
-		else void this.toEnglish();
+		if (mode === "insert" || mode === "replace") this.enqueue(() => this.restore());
+		else this.enqueue(() => this.toEnglish());
+	}
+
+	private enqueue(task: () => Promise<void>): void {
+		this.queue = this.queue.then(task, task);
 	}
 
 	private startPolling(): void {
@@ -294,6 +300,9 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 		}
 
 		this.switched = true;
+
+		// The user may have returned to insert mode while we were switching.
+		if (this.lastMode === "insert" || this.lastMode === "replace") await this.restore();
 	}
 
 	private async restore(): Promise<void> {

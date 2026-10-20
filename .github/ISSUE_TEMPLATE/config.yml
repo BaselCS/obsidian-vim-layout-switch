@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: دليل الاستخدام
+    url: https://github.com/BaselCS/obsidian-vim-layout-switch#readme
+    about: اقرأ README أولًا، فقد تجد الحل في قسم استكشاف الأخطاء.
+  - name: أسئلة ونقاشات
+    url: https://github.com/BaselCS/obsidian-vim-layout-switch/discussions
+    about: للأسئلة العامة وطلب المساعدة.

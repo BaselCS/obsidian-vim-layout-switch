@@ -1,0 +1,87 @@
+name: Bug report
+description: أبلغ عن خطأ في عمل الإضافة
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        شكرًا على البلاغ. املأ الحقول التالية بدقة ليسهل تتبّع المشكلة.
+        إن أمكن، فعّل **Debug logging** من إعدادات الإضافة قبل رفع السجل.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: وصف المشكلة
+      description: ما الذي حدث؟ وما الذي كنت تتوقعه؟
+      placeholder: عند الانتقال إلى الوضع العادي تبقى اللغة عربية...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: خطوات إعادة الإنتاج
+      placeholder: |
+        1. افتح ملاحظة تحتوي نصًا عربيًا
+        2. اضغط Escape
+        3. اضغط j
+    validations:
+      required: true
+
+  - type: input
+    id: obsidian
+    attributes:
+      label: إصدار Obsidian
+      placeholder: 1.8.10
+    validations:
+      required: true
+
+  - type: input
+    id: plugin
+    attributes:
+      label: إصدار الإضافة
+      placeholder: 1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: compositor
+    attributes:
+      label: مدير النوافذ
+      options:
+        - Hyprland
+        - Sway
+        - GNOME
+        - KDE Plasma
+        - آخر (اذكر في الوصف)
+    validations:
+      required: true
+
+  - type: input
+    id: layouts
+    attributes:
+      label: تخطيطات لوحة المفاتيح
+      description: ناتج أمر القراءة المناسب لبيئتك
+      placeholder: "hyprctl -j devices | jq '.keyboards[].layout'  →  us,ara"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: سجل وحدة التحكم
+      description: '`Ctrl + Shift + I` ثم Console، مع تفعيل Debug logging'
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: تأكيدات
+      options:
+        - label: تأكدت أن Vim key bindings مُفعّل في إعدادات المحرّر
+          required: true
+        - label: بحثت في المشاكل المفتوحة والمغلقة عن مشكلة مشابهة
+          required: true

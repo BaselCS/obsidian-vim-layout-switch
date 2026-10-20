@@ -1,0 +1,12 @@
+# build output
+main.js
+*.js.map
+
+# dependencies (package-lock.json is committed on purpose)
+node_modules/
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.log

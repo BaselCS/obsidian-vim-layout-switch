@@ -1,0 +1,314 @@
+<div dir="rtl" align="right">
+
+# Vim Layout Switch — تبديل لغة الكتابة تلقائيًا في وضع Vim
+
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=الإصدار" alt="الإصدار">
+  <img src="https://img.shields.io/github/license/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=الرخصة" alt="الرخصة">
+  <img src="https://img.shields.io/badge/المنصة-Linux%20%7C%20Hyprland%20%7C%20Sway-2ea043?style=for-the-badge" alt="المنصة">
+  <img src="https://img.shields.io/github/issues/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=المشاكل" alt="المشاكل">
+</p>
+
+<p align="center">
+  <b>اكتب بالعربية في وضع الإدخال، وتنقّل بحروف <code>hjkl</code> الإنجليزية في الوضع العادي — بدون تبديل يدوي.</b>
+</p>
+
+---
+
+## المشكلة التي يحلّها
+
+إذا كنت تكتب ملاحظاتك بالعربية وتستخدم **وضع Vim** في Obsidian، فأنت تعرف هذا الألم:
+
+- أنت في الوضع العادي (Normal Mode) وتضغط `h` أو `j` لكن لوحة المفاتيح على العربية، فيُكتب لك `ا` أو `ت` بدلًا من الحركة.
+- الحل القديم هو إعادة تعريف كل حرف عربي في ملف `.obsidian.vimrc` ليطابق أمرًا من أوامر Vim، وهذا يستهلك وقتًا، ويكسر الحروف الكبيرة، ويجعل الأوامر المركّبة مثل `ciw` و`gU` صعبة.
+- أو أنك تبدّل اللغة يدويًا في كل مرة تدخل وتخرج من وضع الإدخال — عشرات المرات في الدقيقة.
+
+**هذا الإضافة تقلب المعادلة:** بدلًا من تعليم Vim الحروف العربية، نجعل **نظام التشغيل نفسه** يعيد لوحة المفاتيح إلى الإنجليزية لحظة دخولك الوضع العادي، ثم يعيد العربية لحظة عودتك لوضع الإدخال. النتيجة: أوامر Vim تعمل كما في أي محرر إنجليزي، وكتابتك العربية سليمة.
+
+---
+
+## كيف يعمل
+
+الإضافة تستمع لحدث `vim-mode-change` الذي يطلقه محرر CodeMirror المدمج في Obsidian، ثم تتصرّف حسب الوضع:
+
+| الوضع في Vim | ما تفعله الإضافة |
+| --- | --- |
+| `normal` | تفحص لوحات المفاتيح المتصلة وتُحوّل كل واحدة إلى **لغة إنجليزية** (باستخدام الفهرس الذي تحدده في الإعدادات). |
+| `visual` | نفس السلوك: الإنجليزية، حتى تعمل أوامر التحديد `v` و`viw` و`>>`. |
+| `insert` | **تعيد** لغة كل لوحة مفاتيح إلى ما كانت عليه قبل التحويل (العربية، مثلًا). |
+| `replace` | نفس سلوك وضع الإدخال. |
+
+آلية العمل خطوة بخطوة:
+
+1. عند تحميل الإضافة تكتشف بيئة سطح المكتب: **Hyprland** عبر `hyprctl`، أو **Sway** عبر `swaymsg`.
+2. عند أول دخول للوضع العادي، تقرأ الحالة الحالية لكل لوحة مفاتيح وتحفظها في الذاكرة (لكل جهاز على حدة).
+3. تُصدر أمر التبديل للوحات التي ليست على الإنجليزية بالفعل — ولا تلمس اللوحات التي هي على الإنجليزية أصلًا.
+4. عند الدخول لوضع الإدخال تُعيد كل لوحة إلى فهرستها المحفوظة، ثم تنسى الحالة حتى المرة القادمة.
+
+> **مهم:** الإضافة لا تحفظ التغييرات على القرص ولا تعدّل إعدادات نظامك. كل ما تفعله هو تبديل الجلسة الحالية، وكل شيء يعود لسابقه عند إغلاق Obsidian أو تعطيل الإضافة.
+
+---
+
+## المتطلبات
+
+| المتطلب | التفاصيل |
+| --- | --- |
+| نظام التشغيل | **Linux فقط** (الإضافة سطح مكتب فقط: `isDesktopOnly: true`). |
+| مدير النوافذ | **Hyprland** (مدعوم بالكامل) أو **Sway** (مدعوم بالكامل). |
+| Obsidian | الإصدار **1.4.0** أو أحدث. |
+| وضع Vim | يجب تفعيله من: `Settings → Editor → Vim key bindings`. |
+| لوحات المفاتيح | أي عدد من لوحات المفاتيح المتصلة، تُدار كل واحدة على حدة. |
+
+> لا يعمل على GNOME أو KDE أو Windows أو macOS، لأنها لا توفّر واجهة سطر أوامر مستقرة لتبديل تخطيط لوحة المفاتيح. هذا **بنيوي** وليس خطأً — راجع قسم الأسئلة الشائعة.
+
+---
+
+## التثبيت
+
+### الطريقة الأولى: التثبيت اليدوي (الأسهل)
+
+1. حمّل ثلاثة ملفات من صفحة **Releases** في المستودع:
+   - `main.js`
+   - `manifest.json`
+   - `versions.json` (اختياري، لكن يُفضّل وجوده)
+2. أنشئ المجلد التالي داخل خزنتك:
+
+   ```text
+   <مسار-خزنتك>/.obsidian/plugins/vim-layout-switch/
+   ```
+
+3. ضع الملفات الثلاثة داخله.
+4. أعد تشغيل Obsidian (أو نفّذ `Reload app without saving` من لوحة الأوامر).
+5. فعّل الإضافة من: `Settings → Community plugins → Installed plugins → Vim Layout Switch`.
+
+> المجلد `.obsidian` مخفي في مدير الملفات. استخدم `Ctrl + H` في معظم المديرين لإظهاره.
+
+### الطريقة الثانية: BRAT (تحديثات تلقائية)
+
+1. ثبّت إضافة **BRAT** من متجر إضافات Obsidian.
+2. افتح لوحة الأوامر (`Ctrl + P`) ونفّذ: `BRAT: Add a beta plugin for testing`.
+3. الصق رابط المستودع:
+
+   ```text
+   https://github.com/BaselCS/obsidian-vim-layout-switch
+   ```
+
+4. اضغط `Add Plugin`، ثم فعّل **Vim Layout Switch** من إعدادات الإضافات المجتمعية.
+
+### الطريقة الثالثة: من المصدر
+
+```bash
+git clone https://github.com/BaselCS/obsidian-vim-layout-switch.git
+cd obsidian-vim-layout-switch
+npm install
+npm run build
+```
+
+نسخ الناتج إلى خزنتك:
+
+```bash
+mkdir -p /path/to/vault/.obsidian/plugins/vim-layout-switch
+cp main.js manifest.json /path/to/vault/.obsidian/plugins/vim-layout-switch/
+```
+
+للتطوير المباشر مع إعادة البناء التلقائية:
+
+```bash
+npm run dev
+```
+
+---
+
+## الإعدادات
+
+تجدها في: `Settings → Community plugins → Vim Layout Switch`
+
+| الإعداد | الافتراضي | الشرح |
+| --- | --- | --- |
+| **Enable automatic switching** | مُفعّل | المفتاح الرئيسي للسلوك التلقائي. عند تعطيله تبقى الأوامر اليدوية متاحة. |
+| **English layout index** | `0` | فهرس اللغة الإنجليزية داخل قائمة تخطيطاتك. لـ `layouts = us,ara` الفهرس هو `0`، ولـ `ara,us` الفهرس هو `1`. |
+| **Show compatibility notice** | مُفعّل | إظهار تنبيه مرة واحدة إن لم يُكتشف Hyprland أو Sway. |
+| **Debug logging** | معطّل | طباعة المكتشف وتغييرات الوضع والتبديلات في وحدة تحكم المطوّر (`Ctrl + Shift + I`). |
+
+### كيف أعرف فهرس اللغة الإنجليزية؟
+
+**Hyprland:**
+
+```bash
+hyprctl devices | grep -A2 "Keyboard at"
+```
+
+**Sway:**
+
+```bash
+swaymsg -t get_inputs | grep xkb_active_layout_index
+```
+
+أو انظر إلى سطر `kb_layout` في إعدادات Hyprland:
+
+```ini
+input {
+    kb_layout = us,ara
+}
+```
+
+هنا `us` هو الفهرس `0` و`ara` هو `1`.
+
+---
+
+## الأوامر
+
+يمكنك تنفيذها من لوحة الأوامر (`Ctrl + P`)، ويمكنك ربطها بمفاتيح من `Settings → Hotkeys`:
+
+| الأمر | الوظيفة |
+| --- | --- |
+| `Vim Layout Switch: Switch keyboard layout to English now` | تبديل فوري إلى الإنجليزية (يعمل حتى لو عطّلت التبديل التلقائي). |
+| `Vim Layout Switch: Restore the previous keyboard layout` | إعادة اللغة المحفوظة فورًا. |
+
+---
+
+## استكشاف الأخطاء
+
+### الإضافة لا تفعل شيئًا
+
+1. تأكد أن **Vim key bindings** مُفعّل في `Settings → Editor`.
+2. تأكد أن الإضافة مُفعّلة من إعدادات الإضافات المجتمعية.
+3. فعّل **Debug logging** وافتح وحدة تحكم المطوّر (`Ctrl + Shift + I`). يجب أن ترى سطرًا مثل:
+   `[vim-layout-switch] backend: hyprland`
+4. إن ظهر `backend: unknown` فأنت لست على Hyprland أو Sway، أو أن الأمر غير موجود في `PATH`.
+
+### اللغة تُبدّل لكنها تُبدّل للغة الخطأ
+
+عدّل **English layout index** ليطابق ترتيب تخطيطاتك في إعدادات مدير النوافذ.
+
+### تظهر رسالة عن عدم العثور على مدير نوافذ مدعوم
+
+شغّل Obsidian من الطرفية وتحقق من المتغيرات:
+
+```bash
+echo $HYPRLAND_INSTANCE_SIGNATURE   # Hyprland
+echo $SWAYSOCK                      # Sway
+```
+
+إن كان المتغير فارغًا فأنت لا تشغّل جلسة Hyprland/Sway (أو أنك تشغّل Obsidian بطريقة تفقد البيئة، مثل بعض قوائم التشغيل).
+
+### التبديل يعمل في ملف ويتوقف في آخر
+
+الإضافة تربط نفسها بمحرر الملف النشط. افتح الملف مرة أخرى أو أعد تحميل الواجهة (`Reload app without saving`) لإعادة الربط.
+
+### تبديل يدوي للّغة يتعارض مع الإضافة
+
+إن بدّلت اللغة بنفسك أثناء الوضع العادي، ستُعيد الإضافة لغتك الأصلية عند العودة لوضع الإدخال. هذا سلوك مقصود: الإضافة تحافظ على ما كان قبل دخولك الوضع العادي. استخدم الأمر اليدوي `Switch keyboard layout to English now` إن أردت تبديلًا دائمًا.
+
+### النص العربي يظهر معكوسًا أو مشوّشًا
+
+هذا موضوع منفصل عن هذه الإضافة. جرّب استخدم إضافة `RTL Support` أو `Arabic RTL` أو مقتطف CSS يضبط `direction: rtl`.
+
+---
+
+## الأسئلة الشائعة
+
+**لماذا لا يوجد دعم لـ GNOME أو KDE؟**
+لأن `gsettings` و`qdbus` لا يعطيان طريقة موحّدة وموثوقة لقراءة *الفهرس النشط* لكل لوحة مفاتيح ثم إعادته. Hyprland وSway يوفّران ذلك عبر JSON. إضافة دعم X11 ممكنة عبر `setxkbmap` لكنها عالمية وليست لكل جهاز، وتكسر الإعدادات المؤقتة.
+
+**هل تعمل مع أكثر من لوحة مفاتيح؟**
+نعم، تُقرأ كل لوحة على حدة وتُحفظ حالتها منفصلة. لوحة داخلية ولوحة USB خارجية تعملان معًا.
+
+**هل تعمل مع لوحة عربية 101 أم 102 مفتاحًا؟**
+لا علاقة للإضافة بشكل اللوحة؛ هي تتعامل مع *فهرس اللغة* فقط. كل ما يهم هو أن اللغة العربية موجودة في `kb_layout`.
+
+**هل تُرسل بيانات لأي مكان؟**
+لا. الإضافة تعمل محليًا بالكامل ولا تتصل بالشبكة مطلقًا.
+
+**هل ستحفظ التبديلات بعد إغلاق Obsidian؟**
+لا، ولو أُغلقت Obsidian وأنت في الوضع العادي فقد تبقى اللغة الإنجليزية حتى تعيد التبديل يدويًا. الإضافة تحاول الإرجاع عند تعطيلها أو إغلاق النافذة.
+
+**هل يمكن استخدامها مع حروف عربية في الوضع العادي بدلًا من تبديل اللغة؟**
+نعم، لكننا لا ننصح بذلك. كان هذا الحل القديم (ملف `.obsidian.vimrc` مع إضافة `obsidian-vimrc-support`)، وهو يعمل لكنه لا يدعم الأوامر المركّبة والحروف الكبيرة بشكل جيد، ويتعارض مع الإضافات الأخرى. تبديل اللغة على مستوى النظام أنظف وأسرع.
+
+---
+
+## هيكل المشروع
+
+```text
+obsidian-vim-layout-switch/
+├── src/
+│   └── main.ts                  # كل منطق الإضافة (TypeScript)
+├── manifest.json                # بيانات الإضافة التي يقرأها Obsidian
+├── versions.json                # خريطة الإصدارات → أقل إصدار Obsidian
+├── package.json                 # الحزم والأوامر
+├── tsconfig.json                # إعداد TypeScript
+├── esbuild.config.mjs           # بناء الحزمة إلى main.js
+├── version-bump.mjs             # مزامنة الإصدار عند `npm version`
+├── .github/
+│   ├── workflows/
+│   │   ├── build.yml            # فحص الأنواع والبناء عند كل push
+│   │   └── release.yml          # إنشاء إصدار GitHub تلقائيًا عند وسم tag
+│   ├── ISSUE_TEMPLATE/          # قوالب البلاغات
+│   └── PULL_REQUEST_TEMPLATE.md
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LICENSE
+└── README.md
+```
+
+---
+
+## التطوير
+
+```bash
+npm install      # تثبيت الاعتماديات
+npm run dev      # مراقبة وإعادة بناء تلقائية
+npm run build    # فحص الأنواع + بناء نسخة مصغّرة
+npm run version  # رفع الإصدار (يُشغّل تلقائيًا مع npm version)
+```
+
+قبل إرسال أي تعديل، تأكد أن `npm run build` ينجح دون أخطاء.
+
+### إصدار نسخة جديدة
+
+```bash
+npm version patch   # أو minor / major
+git push --follow-tags
+```
+
+الوسم `1.0.1` سيُشغّل سير عمل GitHub Actions ويُنشئ Release يحتوي `main.js` و`manifest.json` و`versions.json` — وهي الملفات التي تحتاجها BRAT والتثبيت اليدوي.
+
+---
+
+## النشر في متجر إضافات Obsidian
+
+المستودع مهيأ للقبول في المتجر الرسمي:
+
+1. أضف وسم إصدار وأنشئ Release.
+2. افتح PR في مستودع [`obsidianmd/obsidian-releases`](https://github.com/obsidianmd/obsidian-releases) وأضف سطرًا في `community-plugins.json`:
+
+   ```json
+   {
+     "id": "vim-layout-switch",
+     "name": "Vim Layout Switch",
+     "author": "BaselCS",
+     "description": "Switches the keyboard layout to English in Vim normal/visual mode and restores your layout (e.g. Arabic) in insert mode.",
+     "repo": "BaselCS/obsidian-vim-layout-switch"
+   }
+   ```
+
+3. انتظر المراجعة. تأكد أن `manifest.json` مطابق تمامًا للإصدار الموسوم.
+
+---
+
+## المساهمة
+
+نرحّب بالبلاغات والاقتراحات وطلبات الدمج. راجع [CONTRIBUTING.md](CONTRIBUTING.md) قبل البدء.
+
+- بلاغ خطأ: استخدم قالب **Bug report** واذكر مدير النوافذ وإصداره وإصدار Obsidian وسجل التصحيح.
+- اقتراح ميزة: استخدم قالب **Feature request** واشرح حالة الاستخدام.
+- طلب دعم مدير نوافذ جديد: اذكر اسمه والأوامر التي تقرأ وتغيّر اللغة.
+
+---
+
+## الرخصة
+
+[MIT](LICENSE) © 2026 BaselCS
+
+</div>

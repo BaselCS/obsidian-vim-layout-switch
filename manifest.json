@@ -1,0 +1,10 @@
+{
+	"id": "vim-layout-switch",
+	"name": "Vim Layout Switch",
+	"version": "1.0.0",
+	"minAppVersion": "1.4.0",
+	"description": "Switches the keyboard layout to English in Vim normal/visual mode and restores your layout (e.g. Arabic) in insert mode.",
+	"author": "BaselCS",
+	"authorUrl": "https://github.com/BaselCS",
+	"isDesktopOnly": true
+}

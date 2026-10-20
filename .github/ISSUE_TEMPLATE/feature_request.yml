@@ -1,0 +1,39 @@
+name: Feature request
+description: اقترح ميزة أو تحسينًا
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: المشكلة أو الحاجة
+      description: ما الصعوبة التي تواجهها حاليًا؟
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: الحل المقترح
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: بدائل جربتها
+    validations:
+      required: false
+
+  - type: dropdown
+    id: compositor
+    attributes:
+      label: مدير النوافذ المعني
+      options:
+        - Hyprland
+        - Sway
+        - X11 (عام)
+        - آخر
+        - غير محدد
+    validations:
+      required: false

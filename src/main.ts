@@ -6,6 +6,31 @@ const run = promisify(execFile);
 
 type Backend = "hyprland" | "sway" | "unknown";
 
+/** How horizontal Vim motions should behave inside right-to-left text. */
+type RtlSwapMode = "off" | "auto" | "always";
+
+interface VimApi {
+	getRegisterController?: () => PatchedRegisterController;
+	handleKey?: (cm: any, key: string, origin?: string) => boolean | void;
+}
+
+/**
+ * Physical directions are mirrored in RTL text: `h`/`l` and the arrow keys are
+ * swapped so the caret always follows the key, and `0`/`$` are swapped so they
+ * still mean "leftmost" and "rightmost".
+ */
+const RTL_SWAP: Record<string, string> = {
+	h: "l",
+	l: "h",
+	ArrowLeft: "<Right>",
+	ArrowRight: "<Left>",
+	"0": "$",
+	$: "0",
+};
+
+const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g;
+const LTR_LETTER = /[A-Za-z\u00C0-\u024F]/g;
+
 interface KeyboardState {
 	/** Device identifier used by the compositor (hyprctl / swaymsg). */
 	name: string;
@@ -24,6 +49,8 @@ interface VimLayoutSwitchSettings {
 	debug: boolean;
 	/** Emulate Vim's `set clipboard=unnamedplus` without any vimrc plugin. */
 	clipboardUnnamedPlus: boolean;
+	/** Mirror horizontal motions when the text under the cursor is RTL. */
+	rtlHorizontalSwap: RtlSwapMode;
 }
 
 const DEFAULT_SETTINGS: VimLayoutSwitchSettings = {
@@ -32,6 +59,7 @@ const DEFAULT_SETTINGS: VimLayoutSwitchSettings = {
 	showNotices: true,
 	debug: false,
 	clipboardUnnamedPlus: true,
+	rtlHorizontalSwap: "auto",
 };
 
 interface SystemClipboard {
@@ -197,7 +225,7 @@ function systemClipboard(): SystemClipboard | null {
  * `window.CodeMirrorAdapter`. It is the only supported way to reach the
  * register controller from a plugin.
  */
-function vimApi(): { getRegisterController?: () => PatchedRegisterController } | null {
+function vimApi(): VimApi | null {
 	const w = window as unknown as {
 		CodeMirrorAdapter?: { Vim?: any };
 		CodeMirror?: { Vim?: any };
@@ -205,7 +233,13 @@ function vimApi(): { getRegisterController?: () => PatchedRegisterController } |
 
 	const vim = w.CodeMirrorAdapter?.Vim ?? w.CodeMirror?.Vim;
 	if (!vim || typeof vim.getRegisterController !== "function") return null;
-	return vim;
+	return vim as VimApi;
+}
+
+function countLetters(text: string): { rtl: number; ltr: number; total: number } {
+	const rtl = (text.match(RTL_LETTER) ?? []).length;
+	const ltr = (text.match(LTR_LETTER) ?? []).length;
+	return { rtl, ltr, total: rtl + ltr };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -408,41 +442,126 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 		return mode ?? this.lastMode;
 	}
 
+	/* ------------------------------------------------------------ rtl motion */
+
+	/** Is the text around the caret right-to-left? */
+	private isRtlAt(cm: any): boolean {
+		let cursor: { line: number; ch: number };
+		let line: string;
+
+		try {
+			cursor = cm.getCursor();
+			line = cm.getLine(cursor.line) ?? "";
+		} catch {
+			return false;
+		}
+
+		// Strongest signal: the run of characters next to the caret.
+		const from = Math.max(0, cursor.ch - 24);
+		const to = Math.min(line.length, cursor.ch + 24);
+		const near = countLetters(line.slice(from, to));
+		if (near.total > 0) return near.rtl > near.ltr;
+
+		const own = countLetters(line);
+		if (own.total > 0) return own.rtl > own.ltr;
+
+		// Empty line or a bare bullet: borrow the surrounding context.
+		for (let offset = 1; offset <= 2; offset += 1) {
+			for (const index of [cursor.line - offset, cursor.line + offset]) {
+				if (index < 0) continue;
+				let text: string;
+				try {
+					text = cm.getLine(index) ?? "";
+				} catch {
+					continue;
+				}
+				const counts = countLetters(text);
+				if (counts.total > 0) return counts.rtl > counts.ltr;
+			}
+		}
+
+		return false;
+	}
+
+	/** The key to replay instead of `key`, or null to let vim handle it. */
+	private rtlSwapKey(cm: any, key: string): string | null {
+		const mode = this.settings.rtlHorizontalSwap;
+		if (mode === "off") return null;
+
+		const swapped = RTL_SWAP[key];
+		if (!swapped) return null;
+		if (mode === "auto" && !this.isRtlAt(cm)) return null;
+
+		// `f`, `t`, `r`, `m`… wait for a literal character: never touch it.
+		const vimState = cm?.state?.vim;
+		if (vimState?.expectLiteralNext) return null;
+
+		// A pending digit means the key belongs to a count (`10j`, `2$`).
+		const repeat = vimState?.inputState?.motionRepeat;
+		const hasCount = Array.isArray(repeat) ? repeat.length > 0 : Boolean(repeat);
+		if (hasCount && (key === "0" || key === "$")) return null;
+
+		return swapped;
+	}
+
 	/**
 	 * `clipboard=unnamedplus` also means `p` pastes what the rest of the system
 	 * copied. The unnamed register is refreshed from the clipboard before vim
 	 * handles the key, which keeps the paste synchronous (and undoable).
+	 *
+	 * The same capture phase is used to mirror horizontal motions in RTL text
+	 * and replay the swapped key straight into vim (counts and pending
+	 * operators stay intact because vim's input state is untouched).
 	 */
 	private onKeyDownCapture = (event: KeyboardEvent): void => {
-		if (!this.settings.clipboardUnnamedPlus) return;
 		if (event.defaultPrevented || event.isComposing) return;
 		if (event.ctrlKey || event.metaKey || event.altKey) return;
-
-		const key = event.key;
-		if (key !== "p" && key !== "P") return;
-
-		const mode = this.currentMode();
-		if (mode !== "normal" && mode !== "visual") return;
 
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const target = event.target as Node | null;
 		if (!view || !target || !view.containerEl.contains(target)) return;
 
-		const clipboard = systemClipboard();
-		if (!clipboard) return;
+		const mode = this.currentMode();
+		if (mode !== "normal" && mode !== "visual") return;
 
-		let text = "";
-		try {
-			text = clipboard.readText();
-		} catch {
+		const cm = getCodeMirror(view);
+		if (!cm) return;
+
+		const key = event.key;
+
+		if (this.settings.clipboardUnnamedPlus && (key === "p" || key === "P")) {
+			const clipboard = systemClipboard();
+			if (!clipboard) return;
+
+			let text = "";
+			try {
+				text = clipboard.readText();
+			} catch {
+				return;
+			}
+			if (!text) return;
+
+			try {
+				this.registerController?.getRegister('"')?.setText(text, text.endsWith("\n"), false);
+			} catch {
+				/* register controller vanished */
+			}
 			return;
 		}
-		if (!text) return;
+
+		const swapped = this.rtlSwapKey(cm, key);
+		if (!swapped) return;
+
+		const vim = vimApi();
+		if (typeof vim?.handleKey !== "function") return;
+
+		event.preventDefault();
+		event.stopPropagation();
 
 		try {
-			this.registerController?.getRegister('"')?.setText(text, text.endsWith("\n"), false);
-		} catch {
-			/* register controller vanished */
+			vim.handleKey(cm, swapped);
+		} catch (error) {
+			this.log("could not replay the mirrored key", error);
 		}
 	};
 
@@ -575,6 +694,24 @@ class VimLayoutSwitchSettingTab extends PluginSettingTab {
 						const parsed = Number.parseInt(value, 10);
 						if (Number.isNaN(parsed) || parsed < 0) return;
 						this.plugin.settings.englishLayoutIndex = parsed;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("RTL horizontal movement")
+			.setDesc(
+				"Swap h/l, the arrow keys and 0/$ when the text under the cursor is right-to-left, " +
+					"so the caret follows the physical key. Word motions (w/b) stay logical.",
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("off", "Off — always logical")
+					.addOption("auto", "Auto — detect RTL text")
+					.addOption("always", "Always — RTL vault")
+					.setValue(this.plugin.settings.rtlHorizontalSwap)
+					.onChange(async (value) => {
+						this.plugin.settings.rtlHorizontalSwap = value as RtlSwapMode;
 						await this.plugin.saveSettings();
 					}),
 			);

@@ -30,6 +30,9 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+      - name: Run tests
+        run: npm test
+
       - name: Verify build artifacts
         run: |
           test -f main.js

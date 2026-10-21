@@ -1,6 +1,7 @@
 # build output
 main.js
 *.js.map
+tests/.build/
 
 # dependencies (package-lock.json is committed on purpose)
 node_modules/

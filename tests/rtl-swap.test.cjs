@@ -72,20 +72,29 @@ const ltrCm = makeCm(ENGLISH, 6);
 
 check("rtl h -> l", plugin.rtlSwapKey(rtlCm, "h"), "l");
 check("rtl l -> h", plugin.rtlSwapKey(rtlCm, "l"), "h");
-check("rtl 0 -> $", plugin.rtlSwapKey(rtlCm, "0"), "$");
-check("rtl $ -> 0", plugin.rtlSwapKey(rtlCm, "$"), "0");
 check("rtl ArrowLeft -> <Right>", plugin.rtlSwapKey(rtlCm, "ArrowLeft"), "<Right>");
 check("rtl ArrowRight -> <Left>", plugin.rtlSwapKey(rtlCm, "ArrowRight"), "<Left>");
+
+check("rtl w untouched (logical flow)", plugin.rtlSwapKey(rtlCm, "w"), null);
+check("rtl b untouched (logical flow)", plugin.rtlSwapKey(rtlCm, "b"), null);
+check("rtl e untouched (logical flow)", plugin.rtlSwapKey(rtlCm, "e"), null);
+check("rtl 0 untouched (logical start)", plugin.rtlSwapKey(rtlCm, "0"), null);
+check("rtl $ untouched (logical end)", plugin.rtlSwapKey(rtlCm, "$"), null);
+
 check("ltr h untouched", plugin.rtlSwapKey(ltrCm, "h"), null);
+check("ltr l untouched", plugin.rtlSwapKey(ltrCm, "l"), null);
 check("ltr $ untouched", plugin.rtlSwapKey(ltrCm, "$"), null);
+check("ltr w untouched", plugin.rtlSwapKey(ltrCm, "w"), null);
+check("ltr b untouched", plugin.rtlSwapKey(ltrCm, "b"), null);
+check("ltr e untouched", plugin.rtlSwapKey(ltrCm, "e"), null);
 check("unrelated key untouched", plugin.rtlSwapKey(rtlCm, "j"), null);
 
-check(
-	"pending count keeps 0 literal (10$)",
-	plugin.rtlSwapKey(makeCm(ARABIC, 8, { repeat: ["1"] }), "0"),
-	null,
-);
-check("plain 0 still swaps", plugin.rtlSwapKey(makeCm(ARABIC, 8, { repeat: [] }), "0"), "$");
+plugin.saved = [{ name: "kb", index: 1, keymap: "Arabic" }];
+check("empty document with saved RTL layout detects RTL", plugin.isCurrentLanguageRtl(makeCm("", 0)), true);
+check("saved RTL layout swaps on empty document", plugin.rtlSwapKey(makeCm("", 0), "h"), "l");
+plugin.saved = null;
+check("empty document without saved layout stays LTR", plugin.isCurrentLanguageRtl(makeCm("", 0)), false);
+
 check(
 	"commands waiting for a literal (f/t/r/m) are never swapped",
 	plugin.rtlSwapKey(makeCm(ARABIC, 8, { expectLiteral: true }), "h"),
@@ -99,7 +108,6 @@ check("off mode ignores arabic", plugin.rtlSwapKey(rtlCm, "h"), null);
 
 plugin.settings.rtlHorizontalSwap = "always";
 check("always mode swaps in english", plugin.rtlSwapKey(ltrCm, "h"), "l");
-check("always mode still protects counts", plugin.rtlSwapKey(makeCm(ARABIC, 8, { repeat: ["2"] }), "$"), null);
 
 /* ------------------------------------------------------------- report --- */
 

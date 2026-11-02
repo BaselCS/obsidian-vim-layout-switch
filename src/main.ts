@@ -15,27 +15,29 @@ interface VimApi {
 }
 
 /**
- * Physical directions are mirrored in RTL text: `h`/`l` and the arrow keys are
- * swapped so the caret always follows the key, and `0`/`$` are swapped so they
- * still mean "leftmost" and "rightmost".
+ * Character motions swapped so the caret follows physical directions in RTL text:
+ * `h`/`l` and arrow keys.
+ * Note: Word motions (w, b, e, W, B, ge) and line boundaries (0, $) follow logical
+ * reading order in Arabic, so they are kept standard.
  */
 const RTL_SWAP: Record<string, string> = {
 	h: "l",
 	l: "h",
 	ArrowLeft: "<Right>",
 	ArrowRight: "<Left>",
-	"0": "$",
-	$: "0",
 };
 
 const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g;
 const LTR_LETTER = /[A-Za-z\u00C0-\u024F]/g;
+const RTL_KEYBOARD_LAYOUT = /arabic|arab|ara|hebrew|heb|persian|farsi|fas|per|urdu|urd|yiddish|uyghur/i;
 
 interface KeyboardState {
 	/** Device identifier used by the compositor (hyprctl / swaymsg). */
 	name: string;
 	/** Currently active layout index for that device. */
 	index: number;
+	/** Active keymap or layout name, if available. */
+	keymap?: string;
 }
 
 interface VimLayoutSwitchSettings {
@@ -108,7 +110,8 @@ async function readHyprland(): Promise<KeyboardState[]> {
 	for (const kb of keyboards) {
 		const name = kb?.["name"];
 		if (typeof name !== "string" || !name) continue;
-		result.push({ name, index: hyprlandActiveIndex(kb) });
+		const keymap = String(kb["active_keymap"] ?? kb["layout"] ?? "");
+		result.push({ name, index: hyprlandActiveIndex(kb), keymap });
 	}
 
 	return result;
@@ -139,7 +142,8 @@ async function readSway(): Promise<KeyboardState[]> {
 		const name = input["identifier"] ?? input["name"];
 		if (typeof name !== "string" || !name) continue;
 		const index = Number(input["xkb_active_layout_index"] ?? 0);
-		result.push({ name, index: Number.isFinite(index) ? index : 0 });
+		const keymap = String(input["xkb_active_layout_name"] ?? "");
+		result.push({ name, index: Number.isFinite(index) ? index : 0, keymap });
 	}
 
 	return result;
@@ -444,8 +448,10 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 
 	/* ------------------------------------------------------------ rtl motion */
 
-	/** Is the text around the caret right-to-left? */
-	private isRtlAt(cm: any): boolean {
+	/**
+	 * Returns "rtl" if letters are predominantly RTL, "ltr" if LTR, or "neutral" if none found.
+	 */
+	textDirectionAt(cm: any): "rtl" | "ltr" | "neutral" {
 		let cursor: { line: number; ch: number };
 		let line: string;
 
@@ -453,17 +459,17 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 			cursor = cm.getCursor();
 			line = cm.getLine(cursor.line) ?? "";
 		} catch {
-			return false;
+			return "neutral";
 		}
 
 		// Strongest signal: the run of characters next to the caret.
 		const from = Math.max(0, cursor.ch - 24);
 		const to = Math.min(line.length, cursor.ch + 24);
 		const near = countLetters(line.slice(from, to));
-		if (near.total > 0) return near.rtl > near.ltr;
+		if (near.total > 0) return near.rtl > near.ltr ? "rtl" : "ltr";
 
 		const own = countLetters(line);
-		if (own.total > 0) return own.rtl > own.ltr;
+		if (own.total > 0) return own.rtl > own.ltr ? "rtl" : "ltr";
 
 		// Empty line or a bare bullet: borrow the surrounding context.
 		for (let offset = 1; offset <= 2; offset += 1) {
@@ -476,21 +482,48 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 					continue;
 				}
 				const counts = countLetters(text);
-				if (counts.total > 0) return counts.rtl > counts.ltr;
+				if (counts.total > 0) return counts.rtl > counts.ltr ? "rtl" : "ltr";
 			}
 		}
 
+		return "neutral";
+	}
+
+	/** Is the text around the caret right-to-left? */
+	isRtlAt(cm: any): boolean {
+		return this.textDirectionAt(cm) === "rtl";
+	}
+
+	/** Checks if the user's saved/active keyboard layout is RTL (e.g. Arabic, Hebrew). */
+	isKeyboardRtl(): boolean {
+		const states = this.saved;
+		if (states && states.length > 0) {
+			for (const kb of states) {
+				if (kb.keymap && RTL_KEYBOARD_LAYOUT.test(kb.keymap)) return true;
+				if (kb.index !== this.settings.englishLayoutIndex && (!kb.keymap || !/english|us|uk|gb/i.test(kb.keymap))) {
+					return true;
+				}
+			}
+		}
 		return false;
 	}
 
+	/** Determines if the current language/context is RTL (from text or keyboard). */
+	isCurrentLanguageRtl(cm: any): boolean {
+		const dir = this.textDirectionAt(cm);
+		if (dir === "rtl") return true;
+		if (dir === "ltr") return false;
+		return this.isKeyboardRtl();
+	}
+
 	/** The key to replay instead of `key`, or null to let vim handle it. */
-	private rtlSwapKey(cm: any, key: string): string | null {
+	rtlSwapKey(cm: any, key: string): string | null {
 		const mode = this.settings.rtlHorizontalSwap;
 		if (mode === "off") return null;
 
 		const swapped = RTL_SWAP[key];
 		if (!swapped) return null;
-		if (mode === "auto" && !this.isRtlAt(cm)) return null;
+		if (mode === "auto" && !this.isCurrentLanguageRtl(cm)) return null;
 
 		// `f`, `t`, `r`, `m`… wait for a literal character: never touch it.
 		const vimState = cm?.state?.vim;
@@ -559,7 +592,13 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 		event.stopPropagation();
 
 		try {
-			vim.handleKey(cm, swapped);
+			if (swapped.length > 1 && !swapped.startsWith("<")) {
+				for (const ch of swapped) {
+					vim.handleKey(cm, ch);
+				}
+			} else {
+				vim.handleKey(cm, swapped);
+			}
 		} catch (error) {
 			this.log("could not replay the mirrored key", error);
 		}
@@ -701,13 +740,13 @@ class VimLayoutSwitchSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("RTL horizontal movement")
 			.setDesc(
-				"Swap h/l, the arrow keys and 0/$ when the text under the cursor is right-to-left, " +
-					"so the caret follows the physical key. Word motions (w/b) stay logical.",
+				"Swap h/l and arrow keys when the text/language is right-to-left, " +
+					"so the caret follows physical direction. Word motions (w/b/e) and line bounds (0/$) follow natural reading order.",
 			)
 			.addDropdown((dropdown) =>
 				dropdown
-					.addOption("off", "Off — always logical")
-					.addOption("auto", "Auto — detect RTL text")
+					.addOption("off", "Off — standard Vim direction")
+					.addOption("auto", "Auto — detect RTL text and language")
 					.addOption("always", "Always — RTL vault")
 					.setValue(this.plugin.settings.rtlHorizontalSwap)
 					.onChange(async (value) => {

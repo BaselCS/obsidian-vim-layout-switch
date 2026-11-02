@@ -3,10 +3,10 @@
 # Vim Layout Switch — تبديل لغة الكتابة تلقائيًا في وضع Vim
 
 <p align="center">
-  <img src="https://img.shields.io/github/v/release/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=الإصدار" alt="الإصدار">
-  <img src="https://img.shields.io/github/license/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=الرخصة" alt="الرخصة">
-  <img src="https://img.shields.io/badge/المنصة-Linux%20%7C%20Hyprland%20%7C%20Sway-2ea043?style=for-the-badge" alt="المنصة">
-  <img src="https://img.shields.io/github/issues/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=المشاكل" alt="المشاكل">
+  <img src="https://img.shields.io/github/v/release/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=%D8%A7%D9%84%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1" alt="الإصدار">
+  <img src="https://img.shields.io/github/license/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=%D8%A7%D9%84%D8%B1%D8%AE%D8%B5%D8%A9" alt="الرخصة">
+  <img src="https://img.shields.io/badge/%D8%A7%D9%84%D9%85%D9%86%D8%B5%D8%A9-Linux%20%7C%20Hyprland%20%7C%20Sway-2ea043?style=for-the-badge" alt="المنصة">
+  <img src="https://img.shields.io/github/issues/BaselCS/obsidian-vim-layout-switch?style=for-the-badge&label=%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%83%D9%84" alt="المشاكل">
 </p>
 
 <p align="center">

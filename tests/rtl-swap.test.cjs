@@ -65,6 +65,52 @@ check(
 );
 check("empty document defaults to LTR", plugin.isRtlAt(makeCm("", 0)), false);
 
+/* ------------------------------------------------- mixed-script stability --- */
+
+// Regression for the caret ping-pong bug: the direction decision used to come
+// from a ±24 character window around the caret, so exactly at an Arabic/English
+// boundary the decision flipped with every keypress, the mirrored key reversed,
+// and the caret bounced between the two runs instead of crossing them.
+// The decision is now the line's majority, so it must be the same value for
+// every caret column on the line.
+
+const rtlCount = (text) => (text.match(/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g) ?? []).length;
+const ltrCount = (text) => (text.match(/[A-Za-z\u00C0-\u024F]/g) ?? []).length;
+
+/** All distinct decisions `textDirectionAt` gives as the caret sweeps the line. */
+function singleDirection(text) {
+	const expected = rtlCount(text) === ltrCount(text)
+		? "neutral" // exact ties are covered separately below; not expected here
+		: rtlCount(text) > ltrCount(text) ? "rtl" : "ltr";
+	const seen = new Set();
+	for (let ch = 0; ch <= text.length; ch += 1) seen.add(plugin.textDirectionAt(makeCm(text, ch)));
+	return { expected, decisions: [...seen] };
+}
+
+const LATIN_RUN = "qwertyuiopasdfghjklzxcvbnm"; // 26 strong letters
+const ARABIC_RUN = "ها وهنا عشرون حرفا عربيا على الأقل"; // 28 strong letters
+
+check(
+	"arabic-dominant mixed line keeps one direction at every caret column",
+	singleDirection(`${ARABIC_RUN} ثم ${LATIN_RUN}`),
+	{ expected: "rtl", decisions: ["rtl"] },
+);
+check(
+	"latin-dominant mixed line keeps one direction at every caret column",
+	singleDirection(`${LATIN_RUN} ها وهنا عشرون حرفا`),
+	{ expected: "ltr", decisions: ["ltr"] },
+);
+check(
+	"the reported case (سي أس أس / CSS) is stable across the boundary",
+	singleDirection("سي أس أس CSS"),
+	{ expected: "rtl", decisions: ["rtl"] },
+);
+
+// An exact 50/50 tie falls back to the first strong letter (like UAX #9 P3):
+// a cursor-independent tiebreak that also cannot oscillate.
+check("direction tie: first strong letter decides (latin first)", plugin.isRtlAt(makeCm("css منط", 4)), false);
+check("direction tie: first strong letter decides (arabic first)", plugin.isRtlAt(makeCm("منط css", 4)), true);
+
 /* -------------------------------------------------------------- swaps --- */
 
 const rtlCm = makeCm(ARABIC, 8);

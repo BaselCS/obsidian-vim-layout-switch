@@ -29,6 +29,9 @@ const RTL_SWAP: Record<string, string> = {
 
 const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g;
 const LTR_LETTER = /[A-Za-z\u00C0-\u024F]/g;
+/** Non-global copies for testing single characters (`.test` with /g is stateful). */
+const RTL_CHAR = new RegExp(RTL_LETTER.source);
+const LTR_CHAR = new RegExp(LTR_LETTER.source);
 const RTL_KEYBOARD_LAYOUT = /arabic|arab|ara|hebrew|heb|persian|farsi|fas|per|urdu|urd|yiddish|uyghur/i;
 
 interface KeyboardState {
@@ -246,6 +249,15 @@ function countLetters(text: string): { rtl: number; ltr: number; total: number }
 	return { rtl, ltr, total: rtl + ltr };
 }
 
+/** Direction of the first strong letter in the text (the UAX #9 "first strong character" rule). */
+function firstStrongDirection(text: string): "rtl" | "ltr" | null {
+	for (const ch of text) {
+		if (RTL_CHAR.test(ch)) return "rtl";
+		if (LTR_CHAR.test(ch)) return "ltr";
+	}
+	return null;
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Plugin                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -449,7 +461,12 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 	/* ------------------------------------------------------------ rtl motion */
 
 	/**
-	 * Returns "rtl" if letters are predominantly RTL, "ltr" if LTR, or "neutral" if none found.
+	 * Direction of the logical line the caret sits on. Deliberately independent
+	 * of the caret column: a decision that flips as the cursor moves makes the
+	 * swapped motion reverse right at the RTL/LTR boundary, so the caret
+	 * ping-pongs between the two runs instead of crossing them (cursor jitter).
+	 * The line's majority decides; on an exact tie the first strong letter
+	 * decides, like the UAX #9 first-strong-character rule.
 	 */
 	textDirectionAt(cm: any): "rtl" | "ltr" | "neutral" {
 		let cursor: { line: number; ch: number };
@@ -462,16 +479,14 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 			return "neutral";
 		}
 
-		// Strongest signal: the run of characters next to the caret.
-		const from = Math.max(0, cursor.ch - 24);
-		const to = Math.min(line.length, cursor.ch + 24);
-		const near = countLetters(line.slice(from, to));
-		if (near.total > 0) return near.rtl > near.ltr ? "rtl" : "ltr";
-
 		const own = countLetters(line);
-		if (own.total > 0) return own.rtl > own.ltr ? "rtl" : "ltr";
+		if (own.rtl !== own.ltr) return own.rtl > own.ltr ? "rtl" : "ltr";
+		if (own.total > 0) {
+			const first = firstStrongDirection(line);
+			if (first) return first;
+		}
 
-		// Empty line or a bare bullet: borrow the surrounding context.
+		// Empty line or no strong letters: borrow the surrounding context.
 		for (let offset = 1; offset <= 2; offset += 1) {
 			for (const index of [cursor.line - offset, cursor.line + offset]) {
 				if (index < 0) continue;
@@ -482,7 +497,11 @@ export default class VimLayoutSwitchPlugin extends Plugin {
 					continue;
 				}
 				const counts = countLetters(text);
-				if (counts.total > 0) return counts.rtl > counts.ltr ? "rtl" : "ltr";
+				if (counts.rtl !== counts.ltr) return counts.rtl > counts.ltr ? "rtl" : "ltr";
+				if (counts.total > 0) {
+					const first = firstStrongDirection(text);
+					if (first) return first;
+				}
 			}
 		}
 
@@ -741,7 +760,9 @@ class VimLayoutSwitchSettingTab extends PluginSettingTab {
 			.setName("RTL horizontal movement")
 			.setDesc(
 				"Swap h/l and arrow keys when the text/language is right-to-left, " +
-					"so the caret follows physical direction. Word motions (w/b/e) and line bounds (0/$) follow natural reading order.",
+					"so the caret follows physical direction. Auto decides the line's majority once per line, " +
+					"so the caret never jitters at mixed-script boundaries. " +
+					"Word motions (w/b/e) and line bounds (0/$) follow natural reading order.",
 			)
 			.addDropdown((dropdown) =>
 				dropdown
